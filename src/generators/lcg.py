@@ -43,20 +43,23 @@ class NumericalRecipesLCG(LCG):
 
 
 class GlibcLCG(LCG):
-    """glibc rand() LCG: same params as ANSI C but overrides next_int().
+    """glibc rand() LCG: same a, c as ANSI C but uses m=2^32 and upper bits.
 
-    Returns the lower 31 bits masked via & 0x7fffffff. With m=2^31 the state
-    is already < 2^31, so the mask is a no-op — outputs match ANSI C.
+    Uses the upper 15 bits (>> 16 & 0x7fff) instead of the full state.
+    Upper bits of an LCG have better statistical independence than lower bits
+    because the modular multiplication mixes high-order bits more thoroughly —
+    this is the core reason glibc's design extracts upper bits.
     """
 
     def __init__(self, seed_value: int = 0):
-        super().__init__(a=1103515245, c=12345, m=2**31, seed_value=seed_value)
+        super().__init__(a=1103515245, c=12345, m=2**32, seed_value=seed_value)
 
     def next_int(self) -> int:
-        # Mask to lower 31 bits; with m=2^31 this is mathematically redundant
-        # but matches the real glibc implementation where m may differ.
+        # Upper 15 bits: statistically superior to low bits for LCG outputs.
+        # glibc uses this extraction because the low bits of an LCG have short
+        # cycles and visible correlation, while upper bits pass more tests.
         self.state = (self.a * self.state + self.c) % self.m
-        return (self.state >> 0) & 0x7fffffff
+        return (self.state >> 16) & 0x7fff
 
 
 class BadLCG(LCG):

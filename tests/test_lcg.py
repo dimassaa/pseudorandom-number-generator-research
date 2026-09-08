@@ -30,25 +30,29 @@ def test_lcg_numerical_recipes_sequence():
 
 
 def test_lcg_glibc_differs_from_ansi_c():
-    """Glibc and ANSI C use identical params but glibc overrides next_int().
-
-    With m=2^31 for both, the mask & 0x7fffffff is a no-op on the state,
-    so outputs are identical. This test documents that mathematical reality.
-    If this ever diverges (e.g. glibc switches to m=2^32), update accordingly.
-    """
+    """Glibc extracts upper 15 bits with m=2^32, so outputs differ from ANSI C."""
     ansi = AnsiCLCG(seed_value=42)
     glibc = GlibcLCG(seed_value=42)
     ansi_out = ansi.generate(10)
     glibc_out = glibc.generate(10)
-    # Mathematically equivalent: state % 2^31 == state & 0x7fffffff
-    assert ansi_out == glibc_out
+    # glibc outputs the upper bits, ANSI C outputs the full state, so they differ
+    assert ansi_out != glibc_out
+
+
+def test_lcg_glibc_reference_sequence():
+    """Glibc with seed=0 produces the known upper-15-bit reference sequence."""
+    gen = GlibcLCG(seed_value=0)
+    # Reference computed independently: ( (a*s+c) % 2^32 ) >> 16 & 0x7fff
+    # First output: (0*1103515245+12345) % 2^32 = 12345, then 12345 >> 16 = 0
+    expected = [0, 21468, 9988, 22117, 3498, 16927, 16045, 19741, 12122, 8410]
+    assert gen.generate(10) == expected
 
 
 def test_lcg_glibc_output_range():
-    """Glibc outputs are always in [0, 2^31)."""
+    """Glibc outputs are always in [0, 2^15)."""
     gen = GlibcLCG(seed_value=0)
     for value in gen.generate(1000):
-        assert 0 <= value < 2**31
+        assert 0 <= value < 2**15
 
 
 def test_lcg_bad_lattice():
