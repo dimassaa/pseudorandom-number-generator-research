@@ -117,6 +117,8 @@ class LCG(PRNG):
 
 **glibc output method:** The glibc variant uses `m = 2^32` internally and overrides `next_int()` to return the **upper 15 bits**: `(state >> 16) & 0x7fff`. This matches classic glibc `rand_r` behavior (take high-order bits) and genuinely differs from the ANSI C variant (which returns the full 31-bit state modulo 2^31). Note: at `m = 2^31`, a lower-bits mask would be a no-op (state is always `< 2^31`), so `m = 2^32` is required to make the high-bit extraction meaningful.
 
+**glibc `next_float`:** Because glibc's `next_int()` returns a 15-bit quantity in `[0, 2^15)`, it must ALSO override `next_float()` to normalize by `2^15` (not `m = 2^32`): `return self.next_int() / 2**15`. Dividing by `2^32` would cluster all floats near zero (`[0, 2^-17)`), not uniform `[0,1)`.
+
 **Verification against reference:** The ANSI C LCG with seed=0 must produce the first outputs `12345, 1406932606, 654583775, 1449466924, ...`, computed from the recurrence `state = (1103515245 * state + 12345) mod 2^31` starting at state 0.
 
 ---
@@ -381,6 +383,7 @@ Tests to write:
 - `test_lcg_ansi_c_sequence` — seed(0), verify first 10 outputs match C `rand()` reference
 - `test_lcg_numerical_recipes_sequence` — seed(0), verify first 10 outputs
 - `test_lcg_glibc_upper_bits` — seed(0), verify glibc (m=2^32, upper 15 bits) returns values in [0, 2^15) that differ from ANSI C for the same seed
+- `test_lcg_glibc_next_float_uniform` — verify glibc next_float() spans [0,1) (max value close to 1.0, not clustered near zero) — guards against the divide-by-2^32 bug
 - `test_lcg_bad_lattice` — generate 1000 pairs `(X_n, X_{n+1})`, assert they lie on at most `m` distinct planes (verify structural weakness)
 - `test_lcg_next_float_range` — all outputs in `[0.0, 1.0)`
 - `test_lcg_reseed` — seed, generate, re-seed same value, verify identical sequence
