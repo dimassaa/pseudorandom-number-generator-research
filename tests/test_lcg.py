@@ -55,6 +55,17 @@ def test_lcg_glibc_output_range():
         assert 0 <= value < 2**15
 
 
+def test_lcg_glibc_next_float_uniform():
+    """Glibc floats span [0, 1), not clustered near zero."""
+    gen = GlibcLCG(seed_value=0)
+    floats = [gen.next_float() for _ in range(2000)]
+    assert all(0.0 <= f < 1.0 for f in floats)
+    # 15-bit outputs can reach (2^15 - 1)/2^15 ≈ 0.99997, so a uniform
+    # generator must produce values near 1.0; values that only reach a small
+    # fraction of [0,1) indicate the normalization range is wrong.
+    assert max(floats) > 0.99
+
+
 def test_lcg_bad_lattice():
     """BadLCG with m=101 produces at most 101 distinct values (structural weakness)."""
     gen = BadLCG(seed_value=0)

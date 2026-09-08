@@ -61,6 +61,11 @@ class GlibcLCG(LCG):
         self.state = (self.a * self.state + self.c) % self.m
         return (self.state >> 16) & 0x7fff
 
+    def next_float(self) -> float:
+        # Normalize by the upper-15-bit output range 2**15, NOT by m=2**32
+        # (which would cluster glibc floats near zero and break uniformity).
+        return self.next_int() / (1 << 15)
+
 
 class BadLCG(LCG):
     """Intentionally weak LCG: a=3, c=7, m=101.
