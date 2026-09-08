@@ -112,13 +112,12 @@ class LCG(PRNG):
 |---------|---|---|---|-------|
 | `ansi_c` | 1103515245 | 12345 | 2^31 | C `rand()` |
 | `numerical_recipes` | 1664525 | 1013904223 | 2^32 | Numerical Recipes |
-| `glibc` | 1103515245 | 12345 | 2^31 | Same params as ANSI C |
+| `glibc` | 1103515245 | 12345 | **2^32** | glibc `rand_r`, upper 15 bits |
 | `bad` | 3 | 7 | 101 | Intentionally weak |
 
-**glibc output method:** The glibc variant must override `next_int()` to return `(state >> 0) & 0x7fffffff` (lower 31 bits masked). This differs from ANSI C despite identical parameters.
+**glibc output method:** The glibc variant uses `m = 2^32` internally and overrides `next_int()` to return the **upper 15 bits**: `(state >> 16) & 0x7fff`. This matches classic glibc `rand_r` behavior (take high-order bits) and genuinely differs from the ANSI C variant (which returns the full 31-bit state modulo 2^31). Note: at `m = 2^31`, a lower-bits mask would be a no-op (state is always `< 2^31`), so `m = 2^32` is required to make the high-bit extraction meaningful.
 
-**Verification against reference:** The ANSI C LCG with seed=0 must produce:
-- `next_int()` → 12345, 207483410, 475527745, ... (known sequence from C `rand()` with these params)
+**Verification against reference:** The ANSI C LCG with seed=0 must produce the first outputs `12345, 1406932606, 654583775, 1449466924, ...`, computed from the recurrence `state = (1103515245 * state + 12345) mod 2^31` starting at state 0.
 
 ---
 
@@ -381,7 +380,7 @@ from .pcg import PCG32
 Tests to write:
 - `test_lcg_ansi_c_sequence` — seed(0), verify first 10 outputs match C `rand()` reference
 - `test_lcg_numerical_recipes_sequence` — seed(0), verify first 10 outputs
-- `test_lcg_glibc_higher_bits` — seed(0), verify glibc returns different values than ANSI C for same params
+- `test_lcg_glibc_upper_bits` — seed(0), verify glibc (m=2^32, upper 15 bits) returns values in [0, 2^15) that differ from ANSI C for the same seed
 - `test_lcg_bad_lattice` — generate 1000 pairs `(X_n, X_{n+1})`, assert they lie on at most `m` distinct planes (verify structural weakness)
 - `test_lcg_next_float_range` — all outputs in `[0.0, 1.0)`
 - `test_lcg_reseed` — seed, generate, re-seed same value, verify identical sequence
