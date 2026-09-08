@@ -142,12 +142,32 @@ Full Mersenne Twister implementation matching Python's `random` module behavior.
 
 ```python
 class MT19937(PRNG):
+    N = 624
+    M = 397
+    MATRIX_A = 0x9908b0df
+    UPPER_MASK = 0x80000000
+    LOWER_MASK = 0x7fffffff
+
     def seed(self, value: int) -> None:
-        """Initialize state array from seed. Matches Python random.seed(value)."""
-        self.mt[0] = value & 0xffffffff
-        for i in range(1, 624):
-            self.mt[i] = (1812433253 * (self.mt[i-1] ^ (self.mt[i-1] >> 30)) + i) & 0xffffffff
-        self.index = 624
+        """Initialize the 624-word state array from an integer seed.
+
+        Matches Python's random.seed(value) for integer seeds.
+        CRITICAL: CPython seeds integers via init_by_array(), NOT the direct
+        init_genrand() formula. init_by_array first runs init_genrand(19650218)
+        (a fixed constant), then folds the integer seed's 32-bit little-endian
+        words through two mixing passes, and finally forces mt[0] = 0x80000000.
+        Replicate CPython's _randommodule.c exactly so the untempered state
+        recovers identically (required for the Stage 3 attack).
+        """
+        # Split abs(value) into little-endian 32-bit words (init_key).
+        n = abs(value)
+        init_key = [0] if n == 0 else []
+        while n:
+            init_key.append(n & 0xffffffff)
+            n >>= 32
+        # _init_by_array: init_genrand(19650218) then two mixing passes,
+        # CPIython multiplier constants 1664525 and 1566083941, force mt[0] MSB.
+        ...
 
     def _twist(self) -> None:
         """Generate next N words from the algorithm."""
@@ -158,12 +178,12 @@ class MT19937(PRNG):
                 self.mt[i] ^= MATRIX_A
 
     def _temper(self, y: int) -> int:
-        """Apply tempering transformations to output."""
+        """Apply tempering transformations to output. Mask to 32 bits at the end."""
         y ^= (y >> 11)
         y ^= (y << 7) & 0x9d2c5680
         y ^= (y << 15) & 0xefc60000
         y ^= (y >> 18)
-        return y
+        return y & 0xffffffff
 
     def next_int(self) -> int:
         if self.index >= 624:
@@ -172,6 +192,8 @@ class MT19937(PRNG):
         self.index += 1
         return self._temper(y)
 ```
+
+**Critical alert: do NOT use the naive `init_genrand` seeding (`mt[0]=seed; mt[i]=1812433253*(...)`).** It does NOT match CPython and will fail the acid test (`MT19937().seed(42).generate(10000) == random.Random(42).getrandbits(32)`). The binding requirement is byte-identical output to CPython; the seeding algorithm must follow CPython's `init_by_array`. Also: CPython `random()` uses 53-bit resolution (two words) — our inherited `next_float` (div by 2^32) is intentionally NOT bit-identical to `random.random()`, which is correct per spec.
 
 **Critical verification:** After seeding with `seed(42)`, the first 5 outputs from our implementation must match Python's `random.Random(42).getrandbits(32)` exactly. This is the primary correctness test.
 
