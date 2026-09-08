@@ -16,7 +16,7 @@ class PRNG(ABC):
 
     def next_float(self) -> float:
         """Return the next float in [0.0, 1.0) by normalizing next_int()."""
-        return self.next_int() / 0x100000000  # divide by 2^32
+        return self.next_int() / 0x100000000
 
     def generate(self, n: int) -> list[int]:
         """Generate n consecutive 32-bit integers."""
