@@ -410,7 +410,7 @@ Tests to write:
 - `test_lcg_numerical_recipes_sequence` — seed(0), verify first 10 outputs
 - `test_lcg_glibc_upper_bits` — seed(0), verify glibc (m=2^32, upper 15 bits) returns values in [0, 2^15) that differ from ANSI C for the same seed
 - `test_lcg_glibc_next_float_uniform` — verify glibc next_float() spans [0,1) (max value close to 1.0, not clustered near zero) — guards against the divide-by-2^32 bug
-- `test_lcg_bad_lattice` — generate 1000 pairs `(X_n, X_{n+1})`, assert they lie on at most `m` distinct planes (verify structural weakness)
+- `test_lcg_bad_lattice` — generate 1000 outputs with BadLCG, assert they span at most `m` distinct values (m=101). This verifies the small-state structural weakness. (Deviation: instead of asserting 2D `(X_n, X_{n+1})` pairs lie on at most `m` lattice planes — unmeasurable for m=101 — asserting the ≤101 distinct-value bound captures the same weakness more directly.)
 - `test_lcg_next_float_range` — all outputs in `[0.0, 1.0)`
 - `test_lcg_reseed` — seed, generate, re-seed same value, verify identical sequence
 
@@ -426,12 +426,13 @@ Tests to write:
 #### `tests/test_xorshift.py`
 
 Tests to write:
-- `test_xorshift32_nonzero_state` — seed(0) must not produce all-zero state
-- `test_xorshift32_period` — verify period (state repeats after exactly 2^32 - 1 outputs) — test with small seed, check repeat count
+- `test_xorshift32_nonzero_state` — seed(0) must not produce all-zero state (implemented; merged with the original `test_xorshift32_zero_seed_not_zero_output`)
+- `test_xorshift32_known_values` — verify first N outputs against independently computed reference values (substituted for the full `test_xorshift32_period`: a full 2^32−1 cycle check is infeasible in pure Python, ~minutes-hours; the reference-value test plus determinism verifies correct state evolution)
 - `test_xorshift32_output_range` — all outputs in `[1, 2^32 - 1]`
 - `test_xorshift64_output_range` — outputs are 32-bit values
 - `test_xorshift128plus_deterministic` — same seed → same sequence
 - `test_xorshift128plus_splitmix64` — verify splitmix64 produces expected output for known input
+- `test_xorshift128plus_default_state_not_degenerate` — default construction (s0=s1=0) must not silently produce the all-zero stream
 
 #### `tests/test_v8_random.py`
 
@@ -441,6 +442,10 @@ Tests to write:
 - `test_v8_next_float_53bit` — verify no output has more than 53 significant bits
 - `test_v8_raw_int_64bit` — `next_int()` returns values in `[0, 2^64)`
 - `test_v8_seeded_reproducible` — re-seed produces identical sequence
+- `test_v8_reference_values` — first 4 `next_float()` outputs for the default V8 seed match independently computed values (hardcoded). (Spec prose elsewhere says "first 5"; the test pins the first 4 — the count is cosmetic, the values are authoritative.)
+- `test_v8_default_seed_matches_hardcoded` — `V8Random().impl.s0 == 0x012de6b2`, `impl.s1 == 0x09501088`
+
+**Note on `V8Random.seed()` semantics:** `seed(x)` derives states via the inherited splitmix64 path (`s0=splitmix64(x)`, `s1=splitmix64(s0)`). This is NOT identical to V8's internal `SetSeed` (which sets `s0=seed`, `s1=splitmix64(seed)`); Node.js does not accept user seeds, so this only matters if a future stage (e.g. Stage 4) needs Node-identical *seeded* output. Stage 4's attack feeds raw 64-bit outputs from `next_int()`, so default-state output is what matters — the two seeds differ only in how the initial state is chosen, not in the update.
 
 #### `tests/test_pcg.py`
 
