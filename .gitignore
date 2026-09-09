@@ -16,11 +16,6 @@ results/
 .coverage
 htmlcov/
 
-# Auto-generated report artifacts (produced by src/report.py during the report
-# stage / integration tests; regenerated on demand, never hand-edited).
-docs/report.md
-docs/figures/
-
 # Editors
 .vscode/
 .idea/

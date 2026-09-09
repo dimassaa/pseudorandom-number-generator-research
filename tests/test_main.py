@@ -192,8 +192,11 @@ def test_main_report_stage(tmp_path):
         ["--stage", "report",
          "--results-dir", str(results_dir), "--figures-dir", str(results_dir / "figures")]
     )
+    # Point the report output into tmp (not the real repo docs/) so the test
+    # stays hermetic; run_report falls back to "docs/report.md" when absent.
+    args.report_file = str(tmp_path / "docs" / "report.md")
     out = run_report(args)
-    assert out == "docs/report.md"
+    assert out == args.report_file
     assert os.path.isfile(out)
     with open(out) as f:
         content = f.read()
@@ -214,6 +217,10 @@ def test_main_all_stage(tmp_path):
          "--seed", "7",
          "--results-dir", str(results_dir), "--figures-dir", str(figures_dir)]
     )
+    # Route the report output (and its copied figures/) into tmp so the full
+    # pipeline integration never touches the real repo docs/.
+    args.report_file = str(tmp_path / "docs" / "report.md")
+    report_dir = os.path.dirname(args.report_file)
 
     # Drive the same run_* sequence `main()` dispatches, with our Namespace so
     # we stay hermetic and do not depend on real process argv.
@@ -227,4 +234,7 @@ def test_main_all_stage(tmp_path):
     assert os.path.isfile(os.path.join(results_dir, "metrics.json"))
     assert os.path.isfile(os.path.join(results_dir, "attacks.json"))
     assert os.path.isfile(os.path.join(results_dir, "benchmark.json"))
-    assert os.path.isfile("docs/report.md")
+    assert os.path.isfile(args.report_file)
+    # The report is self-contained: its copied figures live beside it, not in
+    # the repo's docs/figures/.
+    assert os.path.isdir(os.path.join(report_dir, "figures"))

@@ -366,18 +366,23 @@ def run_benchmark(args) -> str:
 def run_report(args) -> str:
     """Generate docs/report.md from saved metrics/attacks/benchmark results.
 
-    The report reads from args.results_dir / args.figures_dir, so tests can
-    point it at fixture directories.  The output file is always docs/report.md
-    relative to the repo root (the parent is created as needed).
+    Reads inputs from args.results_dir / args.figures_dir so tests can point
+    them at fixture directories.  The output path comes from the optional
+    ``args.report_file`` attribute (set by tests to avoid writing into the real
+    repo ``docs/``); when absent it defaults to the spec-mandated
+    ``docs/report.md`` relative to the repo root, with parents created as
+    needed.  Note: ``report_file`` is deliberately NOT a CLI argument — the
+    parser stays spec-exact, this is a test-only wiring hook on the namespace.
 
     Returns the path to the written report.
     """
+    output_file = getattr(args, "report_file", "docs/report.md")
     return generate_report(
         metrics_file=os.path.join(args.results_dir, "metrics.json"),
         attacks_file=os.path.join(args.results_dir, "attacks.json"),
         benchmark_file=os.path.join(args.results_dir, "benchmark.json"),
         figures_dir=args.figures_dir,
-        output_file="docs/report.md",
+        output_file=output_file,
     )
 
 
