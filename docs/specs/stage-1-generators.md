@@ -360,16 +360,20 @@ class PCG32(PRNG):
         self.__init__(value, 0)
 
     def _advance(self) -> None:
-        """Advance LCG state: state = state * 6364136223846793005 + inc."""
+        """Advance LCG state: state = state * 6364136223846793005 + inc (64-bit masked)."""
         oldstate = self.state
-        self.state = oldstate * 6364136223846793005 + self.inc
+        self.state = (oldstate * 6364136223846793005 + self.inc) & 0xffffffffffffffff
 
     def next_int(self) -> int:
         """Generate next 32-bit output via XSH-RR."""
         oldstate = self.state
         self._advance()
-        # XSH-RR output function
-        xorshifted = ((oldstate >> 18) ^ oldstate) >> 27
+        # XSH-RR output function. CRITICAL: mask xorshifted to 32 bits.
+        # In C, xorshifted is a uint32_t and ((oldstate >> 18) ^ oldstate) >> 27
+        # truncates implicitly; Python's arbitrary-precision ints do NOT, so the
+        # missing mask corrupts the top bit on the first output (0xe15c02b7
+        # instead of 0xa15c02b7). The mask is required for bit-exact PCG32.
+        xorshifted = (((oldstate >> 18) ^ oldstate) >> 27) & 0xffffffff
         rot = oldstate >> 59
         return self._rotr32(xorshifted, rot)
 
@@ -381,7 +385,7 @@ class PCG32(PRNG):
 
 **LCG multiplier:** `6364136223846793005` is the official PCG multiplier (from L'Ecuyer's tables). The increment is `(init_seq << 1) | 1` — standard PCG convention ensuring full period.
 
-**Verification:** Seed with `PCG32(42, 54)` — first output must match reference PCG32 implementation. The reference values are documented in PCG paper (Figure 4.2).
+**Verification:** Seed with `PCG32(42, 54)` — the first outputs must be `0xa15c02b7, 0x7b47f409, 0xba1d3330, 0x83d2f293, ...` (official PCG-EXS reference, verified against pcg-c and the reference paper).
 
 ---
 
