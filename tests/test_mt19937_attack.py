@@ -4,8 +4,6 @@ Uses the project's own MT19937 implementation for temper/untemper roundtrips
 and Python's random module as the external target for state recovery tests.
 """
 
-import random
-
 import pytest
 
 from src.generators.mt19937 import MT19937

@@ -108,17 +108,17 @@ def recover_mt19937_state(observations: list[int]) -> MT19937:
     Raises:
         ValueError: If fewer than 624 observations are provided.
     """
-    if len(observations) < 624:
-        raise ValueError("at least 624 observations required")
-
     from src.generators.mt19937 import MT19937
+
+    if len(observations) < MT19937.N:
+        raise ValueError("at least 624 observations required")
 
     instance = MT19937(0)
     # Inject the raw (untempered) state words from the observed outputs.
     # index=624 means the state is exhausted; the next next_int() call will
     # twist and begin producing outputs from the freshly-recovered state.
-    instance.mt = [untemper(x) for x in observations[:624]]
-    instance.index = 624
+    instance.mt = [untemper(x) for x in observations[:MT19937.N]]
+    instance.index = MT19937.N
     return instance
 
 
@@ -134,13 +134,15 @@ def attack_mt19937(
     untempering, then verifies by predicting 1000 future outputs.
 
     Args:
-        num_observations: Must be >= 624 (one full state cycle).
+        num_observations: Must be >= 624 (one full state cycle); if larger,
+            only the first 624 observations are used.
         num_predictions: How many future outputs to predict and compare.
         seed: Seed for the target ``random.Random`` instance.
 
     Returns:
         Dict with:
-            - state_recovered: always True on success
+            - state_recovered: always True on success (the attack either
+              recovers the full state or raises)
             - actual_next: first 10 actual future outputs
             - predicted_next: first 10 predicted outputs
             - match_count: number of exact matches
