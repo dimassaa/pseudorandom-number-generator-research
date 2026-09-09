@@ -59,6 +59,10 @@ GENERATORS = [
     PCG32,
 ]
 
+# Matches the benchmarks module default; 3 repeats is the project's benchmark
+# standard for stable mean/std timing estimates.
+BENCHMARK_REPEATS = 3
+
 
 def environment_block() -> dict:
     """Return the environment metadata dict shared across stage JSON outputs.
@@ -355,7 +359,7 @@ def run_benchmark(args) -> str:
     out = os.path.join(args.results_dir, "benchmark.json")
     results = run_benchmarks(
         n=args.n_bench,
-        repeats=3,
+        repeats=BENCHMARK_REPEATS,
         seed=args.seed,
         output_file=out,
     )
@@ -386,13 +390,13 @@ def run_report(args) -> str:
     )
 
 
-def main() -> None:
-    """Entry point: parse args and run the requested stage(s).
+def _dispatch(args) -> None:
+    """Run the stages ``main()`` selected, in the spec's execution order.
 
-    Stages run in dependency order (generate -> test -> attack -> benchmark ->
-    report) when --stage all is selected.
+    Kept separate from ``main()`` so the integration test can exercise the
+    exact dispatch logic (not a re-inlined copy of it) without depending on
+    real process argv — the Namespace still carries the output paths.
     """
-    args = build_parser().parse_args()
     if args.stage in ("all", "generate"):
         run_generate(args)
     if args.stage in ("all", "test"):
@@ -403,6 +407,16 @@ def main() -> None:
         run_benchmark(args)
     if args.stage in ("all", "report"):
         run_report(args)
+
+
+def main() -> None:
+    """Entry point: parse args and dispatch to the requested stage(s).
+
+    Stages run in dependency order (generate -> test -> attack -> benchmark ->
+    report) when --stage all is selected.
+    """
+    args = build_parser().parse_args()
+    _dispatch(args)
 
 
 if __name__ == "__main__":

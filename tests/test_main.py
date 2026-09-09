@@ -12,6 +12,7 @@ import os
 import pytest
 
 from src.main import (
+    _dispatch,
     build_parser,
     run_generate,
     run_tests,
@@ -222,13 +223,10 @@ def test_main_all_stage(tmp_path):
     args.report_file = str(tmp_path / "docs" / "report.md")
     report_dir = os.path.dirname(args.report_file)
 
-    # Drive the same run_* sequence `main()` dispatches, with our Namespace so
-    # we stay hermetic and do not depend on real process argv.
-    run_generate(args)
-    run_tests(args)
-    run_attacks(args)
-    run_benchmark(args)
-    run_report(args)
+    # Exercise the real dispatch main() performs (via _dispatch) so the stage
+    # execution order is covered by the integration test itself, while staying
+    # hermetic: the Namespace carries the tmp output paths.
+    _dispatch(args)
 
     assert os.path.isfile(os.path.join(results_dir, "generated_sequences.npz"))
     assert os.path.isfile(os.path.join(results_dir, "metrics.json"))

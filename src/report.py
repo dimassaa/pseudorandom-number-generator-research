@@ -33,18 +33,14 @@ def _load_json(path: str):
         return None
 
 
-def _fmt_pvalue(value) -> str:
-    """Format a p-value for the report table, tolerating None/NaN."""
-    if value is None:
-        return "n/a"
-    try:
-        return f"{float(value):.4f}"
-    except (TypeError, ValueError):
-        return "n/a"
+def _fmt_number(value) -> str:
+    """Format a scalar (p-value, statistic, correlation) for report tables.
 
-
-def _fmt_stat(value) -> str:
-    """Format a statistic for the report table, tolerating None/NaN."""
+    Tolerates None, NaN and non-numeric junk so a malformed or partial JSON
+    artifact renders as "n/a" instead of crashing the report.  Shared by the
+    statistics and benchmark tables (p-values and statistics share the exact
+    same rendering).
+    """
     if value is None:
         return "n/a"
     try:
@@ -138,13 +134,19 @@ def _report_statistics(metrics) -> str:
 
         # Extract lag-1 correlation if present; otherwise n/a.
         corr = auto.get("details", {}).get("correlations", {}).get("1")
-        corr_str = _fmt_stat(corr)
+        corr_str = _fmt_number(corr)
         z = runs.get("details", {}).get("z")
-        z_str = _fmt_stat(z)
-        spectral_str = "visual" if spectral.get("passed") is not None else "n/a"
+        z_str = _fmt_number(z)
+        # The spectral test is visual-only; its pass state still matters, so
+        # surface it rather than printing a bare "visual" either way.
+        spectral_passed = spectral.get("passed")
+        if spectral_passed is None:
+            spectral_str = "n/a"
+        else:
+            spectral_str = "visual (pass)" if spectral_passed else "visual (fail)"
 
         lines.append(
-            f"| {name} | {_fmt_pvalue(chi.get('p_value'))} "
+            f"| {name} | {_fmt_number(chi.get('p_value'))} "
             f"| {corr_str} | {z_str} | {spectral_str} |"
         )
     return "\n".join(lines) + "\n"
@@ -244,7 +246,7 @@ def _report_benchmark(benchmark) -> str:
         std_s = gen.get("std_s")
         mean_mbps = gen.get("mean_mbps")
         lines.append(
-            f"| {name} | {_fmt_stat(mean_s)} | {_fmt_stat(std_s)} "
+            f"| {name} | {_fmt_number(mean_s)} | {_fmt_number(std_s)} "
             f"| {_fmt_throughput(mean_mbps)} |"
         )
     return "\n".join(lines) + "\n"
@@ -328,11 +330,22 @@ def _report_conclusions(metrics, attacks, benchmark) -> str:
                     for k, v in gens.items()
                     if k != builtin and (v.get("mean_mbps") or 0.0) > 0
                 }
-                if pure_python:
-                    gap = gens[builtin]["mean_mbps"] / max(pure_python.values())
+                # Guard both sides of the ratio: favouring the built-in over a
+                # zero/absent baseline or a single zero-throughput Python gen
+                # would divide by zero or lie about the comparison.  When no
+                # pure-Python generator has measurable throughput, say that
+                # explicitly instead of silently dropping the finding.
+                builtin_mbps = gens[builtin].get("mean_mbps") or 0.0
+                if pure_python and builtin_mbps > 0:
+                    gap = builtin_mbps / max(pure_python.values())
                     lines.append(
                         f"- C-vs-Python gap: built-in random ~{gap:.1f}× faster "
                         f"than the fastest pure-Python generator."
+                    )
+                else:
+                    lines.append(
+                        "- C-vs-Python gap: no measurable throughput among "
+                        "pure-Python generators — comparison skipped."
                     )
     else:
         lines.append("> [!WARNING] no benchmark data for conclusions.")

@@ -43,7 +43,7 @@ def _write_fixture_files(tmp_path, figures=True):
                     "chi_square": {"statistic": 99.0, "p_value": 0.0001, "passed": False, "comment": ""},
                     "autocorrelation": {"statistic": 0.5, "p_value": None, "passed": False, "comment": "", "details": {"correlations": {"1": 0.5}}},
                     "runs": {"statistic": 2.5, "p_value": 0.01, "passed": False, "comment": "", "details": {"z": 2.5}},
-                    "spectral": {"statistic": None, "p_value": None, "passed": True, "comment": "visual test"},
+                    "spectral": {"statistic": None, "p_value": None, "passed": False, "comment": "visual test"},
                 },
                 "histogram": {"statistic": 1.0, "p_value": None, "passed": True, "comment": "visualization data"},
             },
@@ -115,6 +115,11 @@ def test_report_contains_tables(tmp_path):
     assert "| Generator | Mean (s) | Std (s) | Outputs/s |" in content
     # At least one generator row references BadLCG as a failed generator.
     assert "BadLCG" in content
+    # The spectral column surfaces the visual test's pass state.
+    assert "| AnsiCLCG |" in content
+    assert "visual (pass)" in content
+    assert "| BadLCG |" in content
+    assert "visual (fail)" in content
 
 
 def test_report_embeds_figures(tmp_path):
@@ -134,6 +139,38 @@ def test_report_contains_conclusions(tmp_path):
     assert "## 7. Conclusions" in content
     assert "not cryptographically secure" in content
     assert "BadLCG" in content  # flagged as statistically weak
+
+
+def test_report_conclusions_zero_throughput_fallback(tmp_path):
+    """Conclusions explains when no pure-Python generator has measurable
+    throughput instead of silently dropping the C-vs-Python comparison."""
+    paths = _write_fixture_files(tmp_path)
+    with open(paths["benchmark"]) as f:
+        benchmark = json.load(f)
+    # All pure-Python generators report zero throughput; the built-in baseline
+    # still has a real value, so the ratio would be undefined without the
+    # fallback guarded below.
+    benchmark["generator"] = {
+        "lcg_ansi_c": {"mean_s": 0.001, "std_s": 0.0, "mean_ns_per_output": 10000.0, "mean_mbps": 0.0},
+        "xorshift32": {"mean_s": 0.002, "std_s": 0.0, "mean_ns_per_output": 20000.0, "mean_mbps": 0.0},
+        "builtin_random": {"mean_s": 0.0001, "std_s": 0.0, "mean_ns_per_output": 1000.0, "mean_mbps": 500.0},
+    }
+    with open(paths["benchmark"], "w") as f:
+        json.dump(benchmark, f)
+
+    output = str(tmp_path / "report.md")
+    generate_report(
+        metrics_file=paths["metrics"],
+        attacks_file=paths["attacks"],
+        benchmark_file=paths["benchmark"],
+        figures_dir=paths["figures_dir"],
+        output_file=output,
+    )
+    with open(output) as f:
+        content = f.read()
+    assert "no measurable throughput among pure-Python generators" in content
+    # The ratio-based gap line must NOT appear (all pure-Python gens are 0).
+    assert "built-in random ~" not in content
 
 
 def test_generate_report_missing_files(tmp_path):
