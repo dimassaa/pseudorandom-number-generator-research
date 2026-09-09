@@ -74,8 +74,10 @@ class XorShift128Plus(PRNG):
     There are two construction paths: passing raw s0/s1 states directly to
     __init__ (must be non-zero, else the zero-guard sets s0=1), or seed(),
     which derives both states via splitmix64 from a single integer seed.
-    The next_int step matches V8's xorshift128+ exactly so that V8Random
-    (next task) can call the internal 64-bit path without reimplementation.
+    The next_int step uses the exact xorshift128+ update from V8's algorithm
+    (same as V8Random), but returns only the lower 32 bits of the 64-bit sum.
+    V8Random therefore replicates the step inline to capture the full 64-bit
+    result needed for its float conversion and the Stage-4 attack.
     """
 
     def __init__(self, s0: int = 0, s1: int = 0):
