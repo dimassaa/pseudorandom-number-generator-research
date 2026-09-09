@@ -7,7 +7,7 @@ Stage 3 attack depends on untempering recovering the true MT state.
 
 import random
 
-import pytest
+from scipy.stats import chisquare
 
 from src.generators.mt19937 import MT19937
 
@@ -69,3 +69,25 @@ def test_mt19937_next_float_range():
     for _ in range(1000):
         f = gen.next_float()
         assert 0.0 <= f < 1.0
+
+
+def test_mt19937_next_float_uniform():
+    """Floats from next_float() pass a chi-square uniformity test.
+
+    The spec requires next_float() to be uniform, not merely in range. A fixed
+    seed makes the sample deterministic, so the p-value is reproducible and the
+    test is never flaky. MT19937 is a strong generator, so p > 0.01 always
+    holds at 10^5 samples; the threshold only guards against a real regression
+    in the normalization.
+    """
+    n_samples = 100_000
+    n_bins = 100
+    gen = MT19937(5)
+    # int(f * n_bins) maps [0, 1) onto bin indices 0..n_bins-1 (f < 1 always
+    # floors below n_bins, so no upper clamp is needed)
+    observed = [0] * n_bins
+    for _ in range(n_samples):
+        observed[int(gen.next_float() * n_bins)] += 1
+    expected = [n_samples / n_bins] * n_bins
+    _, p_value = chisquare(observed, f_exp=expected)
+    assert p_value > 0.01

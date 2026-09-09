@@ -1,6 +1,5 @@
 """Tests for XorShift family generators (32, 64, 128+)."""
 
-import pytest
 from src.generators.xorshift import XorShift32, XorShift64, XorShift128Plus
 
 

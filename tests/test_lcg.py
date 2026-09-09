@@ -1,6 +1,5 @@
 """Tests for Linear Congruential Generator (LCG) and its preset variants."""
 
-import pytest
 from src.generators.lcg import (
     LCG,
     AnsiCLCG,
