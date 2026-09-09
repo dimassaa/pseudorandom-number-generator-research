@@ -11,3 +11,8 @@ from .mt19937_attack import (
     recover_mt19937_state,
     attack_mt19937,
 )
+from .xorshift_attack import (
+    brute_force_xorshift32,
+    recover_xorshift64_state,
+    attack_xorshift64,
+)
