@@ -16,6 +16,13 @@ class V8Random(PRNG):
 
     Default construction uses V8's hardcoded seed constants so output is
     reproducible across runs.
+
+    The inherited generate()/generate_floats() work, but unlike every other
+    generator in this package they produce values derived from the 64-bit
+    next_int(): generate() returns ints in [0, 2^64) (not 32-bit), and
+    generate_floats() returns the (raw >> 11) / 2^53 doubles. This follows
+    from the intentional next_int() deviation required by the Stage 4
+    state-recovery attack.
     """
 
     # Entropy seed constants from V8 source (src/base/random-number-generator.h).
