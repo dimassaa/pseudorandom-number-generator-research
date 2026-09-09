@@ -28,6 +28,9 @@ def recover_parameters(observations: list[int], m: int) -> tuple[int, int]:
     Raises:
         ValueError: If fewer than 3 observations given.
         ValueError: If X1 - X0 is not invertible mod m.
+        ValueError: If a 4th observation is present and the recovered
+            parameters fail to reproduce it (deliberate fail-fast — see
+            Stage 3 spec §1.1).
     """
     if len(observations) < 3:
         raise ValueError("at least 3 observations required")

@@ -57,7 +57,7 @@ def recover_parameters(observations: list[int], m: int) -> Tuple[int, int]:
 2. `c = (X_1 - a * X_0) mod m`
 3. Return `(a, c)`.
 4. If `X_1 - X_0` is not invertible mod m (gcd != 1), raise `ValueError`.
-5. **Verify:** check `(a * X_2 + c) % m == X_3` if a 4th observation is provided. If not, warn in return tuple.
+5. **Verify:** check `(a * X_2 + c) % m == X_3` if a 4th observation is provided. Deviation: the original prose said "if not, warn in return tuple"; the implementation instead **raises `ValueError`** on a mismatch. This is deliberate fail-fast hardening (a mis-recovery is always a caller bug — wrong modulus or non-LCG sequence — and returning a broken `(a, c)` silently would be worse). It never fires on legitimate full sequences.
 
 ```python
 class LCGPredictor:
