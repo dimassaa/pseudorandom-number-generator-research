@@ -169,6 +169,7 @@ def time_builtin_random(
     mean_s = float(np.mean(timings))
     std_s = float(np.std(timings, ddof=1)) if repeats > 1 else 0.0
     mean_ns_per_output = mean_s * 1e9 / n
+    # Despite the name, this is outputs per second (spec-mandated key name).
     mean_mbps = n / mean_s
 
     return {
