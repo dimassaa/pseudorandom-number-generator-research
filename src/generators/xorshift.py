@@ -46,6 +46,10 @@ class XorShift64(PRNG):
     lower 32 bits for interface consistency with other generators.
     """
 
+    SHIFT_LEFT_1 = 13
+    SHIFT_RIGHT = 7
+    SHIFT_LEFT_2 = 17
+
     def __init__(self, seed_value: int = 0):
         self.state = seed_value & 0xffffffffffffffff
         if self.state == 0:
@@ -57,9 +61,9 @@ class XorShift64(PRNG):
             self.state = 1
 
     def next_int(self) -> int:
-        self.state ^= (self.state << 13) & 0xffffffffffffffff
-        self.state ^= self.state >> 7
-        self.state ^= (self.state << 17) & 0xffffffffffffffff
+        self.state ^= (self.state << self.SHIFT_LEFT_1) & 0xffffffffffffffff
+        self.state ^= self.state >> self.SHIFT_RIGHT
+        self.state ^= (self.state << self.SHIFT_LEFT_2) & 0xffffffffffffffff
         # Return lower 32 bits for interface consistency
         return self.state & 0xffffffff
 
@@ -67,7 +71,9 @@ class XorShift64(PRNG):
 class XorShift128Plus(PRNG):
     """xorshift128+ with 128-bit state (2x 64-bit), period 2^128 - 1.
 
-    Uses splitmix64 to derive two 64-bit states from a single integer seed.
+    There are two construction paths: passing raw s0/s1 states directly to
+    __init__ (must be non-zero, else the zero-guard sets s0=1), or seed(),
+    which derives both states via splitmix64 from a single integer seed.
     The next_int step matches V8's xorshift128+ exactly so that V8Random
     (next task) can call the internal 64-bit path without reimplementation.
     """
@@ -75,6 +81,10 @@ class XorShift128Plus(PRNG):
     def __init__(self, s0: int = 0, s1: int = 0):
         self.s0 = s0 & 0xffffffffffffffff
         self.s1 = s1 & 0xffffffffffffffff
+        # Degenerate all-zero state would short-circuit to 0 forever, so
+        # remap it to a valid non-zero state, mirroring the sibling classes.
+        if self.s0 == 0 and self.s1 == 0:
+            self.s0 = 1
 
     def seed(self, value: int) -> None:
         """Derive two 64-bit states from a single seed via splitmix64."""

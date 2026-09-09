@@ -18,11 +18,11 @@ def test_xorshift32_known_values():
     assert gen.generate(10) == expected
 
 
-def test_xorshift32_nonzero_state():
-    """seed(0) maps state to 1 — output must never be zero."""
+def test_xorshift32_zero_seed_not_zero_output():
+    """seed(0) must never produce a zero output (state is remapped from 0)."""
     gen = XorShift32(seed_value=0)
-    values = gen.generate(100)
-    assert all(v != 0 for v in values)
+    for _ in range(200):
+        assert gen.next_int() != 0
 
 
 def test_xorshift32_output_range():
@@ -30,13 +30,6 @@ def test_xorshift32_output_range():
     gen = XorShift32(seed_value=1)
     for v in gen.generate(500):
         assert 0 <= v < 2**32
-
-
-def test_xorshift32_zero_seed_not_zero_output():
-    """seed(0) must not produce any zero outputs."""
-    gen = XorShift32(seed_value=0)
-    for _ in range(200):
-        assert gen.next_int() != 0
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +105,13 @@ def test_xorshift128plus_output_range():
         assert 0 <= v < 2**32
 
 
+def test_xorshift128plus_default_state_not_degenerate():
+    """Default s0=s1=0 must not output zeros forever (zero-guard → s0=1)."""
+    gen = XorShift128Plus()
+    for _ in range(100):
+        assert gen.next_int() != 0
+
+
 # ---------------------------------------------------------------------------
 # Cross-generator
 # ---------------------------------------------------------------------------
@@ -124,12 +124,8 @@ def test_xorshift_all_reseed():
         (XorShift128Plus, {}),
     ]:
         gen = cls(**kwargs)
-        if cls is XorShift128Plus:
-            gen.seed(42)
+        gen.seed(42)
         first = gen.generate(20)
-        if cls is XorShift128Plus:
-            gen.seed(42)
-        else:
-            gen.seed(42)
+        gen.seed(42)
         second = gen.generate(20)
         assert first == second, f"{cls.__name__} reseed mismatch"
