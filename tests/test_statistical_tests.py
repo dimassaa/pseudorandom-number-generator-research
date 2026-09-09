@@ -165,6 +165,46 @@ def test_modulus_explicit_badlcg():
     )
 
 
+def test_run_all_tests_ansi_lcg_normalizes_by_output_domain():
+    """AnsiCLCG (m=2^31) must pass chi-square; dividing by 2^32 would
+    cluster all values in the lower half-range and falsify the result."""
+    from src.generators import AnsiCLCG
+
+    results = run_all_tests(AnsiCLCG(), n=200_000, n_spectral=10_000, seed=0)
+    chi = results["chi_square"]
+    assert 0.01 <= chi.p_value <= 0.99, (
+        f"AnsiCLCG should pass uniformity with correct modulus, got p={chi.p_value}"
+    )
+
+
+def test_run_all_tests_glibc_normalizes_by_output_domain():
+    """GlibcLCG outputs 15 bits; the chi-square statistic must stay in a
+    meaningful range, not saturate from division by 2^32."""
+    from src.generators import GlibcLCG
+
+    results = run_all_tests(GlibcLCG(), n=200_000, n_spectral=10_000, seed=0)
+    chi = results["chi_square"]
+    assert chi.statistic < 1_000_000, (
+        f"GlibcLCG statistic {chi.statistic} indicates normalization artifact"
+    )
+
+
+def test_run_all_tests_badlcg_normalizes_by_output_domain():
+    """BadLCG (m=101) must fail uniformity on the merits of its tiny domain,
+    with values spread over its 101-value domain rather than collapsed into a
+    single bin by an oversized normalization modulus."""
+    from src.generators import BadLCG
+
+    results = run_all_tests(BadLCG(), n=200_000, n_spectral=10_000, seed=0)
+    chi = results["chi_square"]
+    occupied_bins = sum(1 for c in chi.details["bin_counts"] if c > 0)
+    assert occupied_bins >= 50, (
+        f"BadLCG values collapsed into {occupied_bins} bins; "
+        "normalization modulus is too large"
+    )
+    assert not chi.passed, "BadLCG should genuinely fail uniformity"
+
+
 def test_run_all_tests_integration():
     """run_all_tests returns correct structure and chi_square passes."""
     from src.generators import PCG32

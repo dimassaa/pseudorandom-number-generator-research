@@ -342,19 +342,30 @@ def run_all_tests(
     identical — the float draw follows the int draw). Spectral uses
     ``n_spectral`` pairs from the head of the integer sample.
 
-    Passes the correct modulus per generator: 2**64 for V8Random (the only
-    64-bit generator, documented as Stage-4 intentional deviation), 2**32 for
-    all others.
+    Passes the correct modulus per generator: the full output-domain width of
+    each class (V8Random 2**64, AnsiCLCG 2**31, GlibcLCG 2**15, BadLCG m=101),
+    falling back to 2**32 for every full-width 32-bit generator. Hardcoding
+    2**32 for all non-V8 generators was a bug: it clustered low-modulus LCG
+    outputs into the first histogram bins and produced saturated, meaningless
+    chi-square statistics.
     """
-    from src.generators import V8Random  # Avoid circular import at module level.
+    # Avoid circular import at module level; import only the classes with a
+    # non-32-bit output domain, since those are the ones that need overriding.
+    from src.generators import V8Random, AnsiCLCG, GlibcLCG, BadLCG
 
     generator.seed(seed)
     values = generator.generate(n)
     floats = generator.generate_floats(n)
     generator_name = type(generator).__name__
 
-    # 32/64-bit split mirrors the documented output widths of the generators.
-    modulus = 2**64 if isinstance(generator, V8Random) else 2**32
+    # Output-domain widths map 1:1 to the generator's documented modulus;
+    # everything not listed here emits full-width 32-bit values.
+    modulus = {
+        V8Random: 2**64,
+        AnsiCLCG: 2**31,
+        GlibcLCG: 2**15,
+        BadLCG: 101,  # design decision: a=3, c=7, m=101
+    }.get(type(generator), 2**32)
 
     return {
         "chi_square": chi_square_test(values, num_bins=num_bins, generator_name=generator_name, modulus=modulus),
