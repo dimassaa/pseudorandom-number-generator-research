@@ -281,7 +281,7 @@ def runs_test(
         details={
             "z": float(z),
             "observed_runs": observed_runs,
-                "expected_runs": float(expectation),
+            "expected_runs": float(expectation),
             "variance": float(variance),
             "n0": n0,
             "n1": n1,
