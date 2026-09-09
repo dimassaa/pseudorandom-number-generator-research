@@ -1,0 +1,14 @@
+# Core numerical and scientific dependencies for the PRNG analysis pipeline.
+numpy>=1.24
+matplotlib>=3.7
+scipy>=1.10
+
+# numba JIT-accelerates the xorshift32 brute-force attack (Stage 4). It is a
+# hard runtime requirement for that attack; without it the attack module raises
+# at import time.
+numba>=0.57
+
+# z3-solver powers the V8 xorshift128+ SMT recovery. It is OPTIONAL at runtime:
+# when absent, the V8 attack degrades gracefully (records recoverable=False).
+# Install to enable that final attack.
+z3-solver>=4.12
