@@ -9,6 +9,7 @@ Style: seaborn-v0_8-whitegrid with tab10 colour mapping by sorted generator
 name for cross-plot consistency.
 """
 
+import math
 import os
 from typing import Optional
 
@@ -19,6 +20,37 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .statistical_tests import TestResult
+
+# Canonical figure ordering mandated by spec §3.2: LCG variants first, then
+# MT19937, xorshift variants, V8, and PCG.  Any generator not listed here is
+# appended after the known families (never silently dropped).
+BASE = [
+    "AnsiCLCG",
+    "NumericalRecipesLCG",
+    "GlibcLCG",
+    "BadLCG",
+    "MT19937",
+    "XorShift32",
+    "XorShift64",
+    "XorShift128Plus",
+    "V8Random",
+    "PCG32",
+]
+
+
+def _sort_key(name: str) -> tuple[int, str]:
+    """Rank *name* by spec ordering, then alphabetically as a tiebreak.
+
+    Unknown names get a group index larger than every known family so they
+    sort last but are still included.
+    """
+    ordinal = BASE.index(name) if name in BASE else len(BASE) + 1
+    return (0 if ordinal <= len(BASE) else 1, name)
+
+
+def _ordered_names(results: dict[str, TestResult]) -> list[str]:
+    """Return generator names in canonical spec order (unknown names last)."""
+    return sorted(results.keys(), key=_sort_key)
 
 # Consistent colour assignment: sorted generator names → tab10 slots.
 # Built lazily per call but deterministic across calls when keys match.
@@ -42,9 +74,9 @@ def _get_style_context():
         return plt.style.context("default")
 
 
-def _save_and_close(fig: plt.Figure, path: str) -> str:
-    """Save figure to *path*, close it, and return the absolute path."""
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+def _save_and_close(fig: plt.Figure, path: str, dpi: int = 150) -> str:
+    """Save figure to *path* at *dpi*, close it, and return the absolute path."""
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     return os.path.abspath(path)
 
@@ -72,7 +104,7 @@ def plot_chi_square_comparison(
 
     with _get_style_context():
         fig, ax = plt.subplots(figsize=figsize)
-        names = sorted(results.keys())
+        names = _ordered_names(results)
         p_vals = [results[n].p_value for n in names]
         colours = [color_map[n] for n in names]
 
@@ -84,7 +116,7 @@ def plot_chi_square_comparison(
         ax.legend()
         ax.tick_params(axis="x", rotation=45)
 
-    return _save_and_close(fig, os.path.join(output_dir, "chi_square_comparison.png"))
+    return _save_and_close(fig, os.path.join(output_dir, "chi_square_comparison.png"), dpi)
 
 
 def plot_autocorrelation(
@@ -122,7 +154,7 @@ def plot_autocorrelation(
         ax.axhline(band, color="grey", linestyle="--", linewidth=0.8, label=f"±2/√N (N={max_n})")
         ax.axhline(-band, color="grey", linestyle="--", linewidth=0.8)
 
-        for name in sorted(results.keys()):
+        for name in _ordered_names(results):
             tr = results[name]
             corrs = tr.details.get("correlations", {})
             if not corrs:
@@ -136,7 +168,7 @@ def plot_autocorrelation(
         ax.set_title("Autocorrelation by Lag")
         ax.legend(fontsize="small")
 
-    return _save_and_close(fig, os.path.join(output_dir, "autocorrelation.png"))
+    return _save_and_close(fig, os.path.join(output_dir, "autocorrelation.png"), dpi)
 
 
 def plot_spectral(
@@ -145,19 +177,24 @@ def plot_spectral(
     dpi: int = 150,
     figsize: tuple[int, int] = (10, 8),
 ) -> str:
-    """2x3 scatter grid of (X_n, X_{n+1}) pairs for each generator.
+    """Scatter grid (2x3 by default) of (X_n, X_{n+1}) pairs for each generator.
 
     Generators whose name contains 'LCG' are labelled "Structured"; all
     others are labelled "Random".  Small markers and low alpha keep the
-    100k-point scatter readable.
+    100k-point scatter readable.  The grid grows to fit more than six
+    generators instead of silently hiding them.
 
     Returns the absolute path to the saved PNG.
     """
+    if not spectral_results:
+        raise ValueError("spectral_results is empty")
+
     os.makedirs(output_dir, exist_ok=True)
 
-    names = sorted(spectral_results.keys())
+    names = _ordered_names(spectral_results)
     n_plots = len(names)
-    n_rows, n_cols = 2, 3
+    n_cols = min(max(n_plots, 1), 3)
+    n_rows = math.ceil(n_plots / n_cols) if n_plots else 1
 
     with _get_style_context():
         fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
@@ -181,7 +218,7 @@ def plot_spectral(
             ax.set_title(f"{name} ({tag})")
 
     fig.suptitle("Spectral Test — 2D Consecutive Pairs", y=1.01)
-    return _save_and_close(fig, os.path.join(output_dir, "spectral.png"))
+    return _save_and_close(fig, os.path.join(output_dir, "spectral.png"), dpi)
 
 
 def plot_runs_z_scores(
@@ -192,7 +229,8 @@ def plot_runs_z_scores(
 ) -> str:
     """Bar chart of |Z| from the runs test for each generator.
 
-    Horizontal dashed lines at ±1.96 mark the 95 % confidence boundaries.
+    A horizontal dashed line at +1.96 marks the 95 % confidence boundary
+    (bars are |Z|, so only the positive threshold is reachable).
 
     Returns the absolute path to the saved PNG.
     """
@@ -201,19 +239,18 @@ def plot_runs_z_scores(
 
     with _get_style_context():
         fig, ax = plt.subplots(figsize=figsize)
-        names = sorted(results.keys())
+        names = _ordered_names(results)
         z_scores = [abs(results[n].details.get("z", 0.0)) for n in names]
         colours = [color_map[n] for n in names]
 
         ax.bar(names, z_scores, color=colours, edgecolor="black", linewidth=0.5)
         ax.set_ylabel("|Z|")
         ax.set_title("Runs Test — |Z| Scores")
-        ax.axhline(1.96, color="red", linestyle="--", linewidth=0.8, label="1.96")
-        ax.axhline(-1.96, color="red", linestyle="--", linewidth=0.8, label="-1.96")
+        ax.axhline(1.96, color="red", linestyle="--", linewidth=0.8, label="1.96 (95% threshold)")
         ax.legend()
         ax.tick_params(axis="x", rotation=45)
 
-    return _save_and_close(fig, os.path.join(output_dir, "runs_z_scores.png"))
+    return _save_and_close(fig, os.path.join(output_dir, "runs_z_scores.png"), dpi)
 
 
 def plot_histograms(
@@ -235,7 +272,7 @@ def plot_histograms(
     with _get_style_context():
         fig, ax = plt.subplots(figsize=figsize)
 
-        for name in sorted(hist_results.keys()):
+        for name in _ordered_names(hist_results):
             tr = hist_results[name]
             bin_edges = np.asarray(tr.details["bin_edges"])
             bin_counts = np.asarray(tr.details["bin_counts"])
@@ -256,7 +293,7 @@ def plot_histograms(
         ax.set_title("Histogram Overlay — Value Distribution")
         ax.legend(fontsize="small")
 
-    return _save_and_close(fig, os.path.join(output_dir, "histograms.png"))
+    return _save_and_close(fig, os.path.join(output_dir, "histograms.png"), dpi)
 
 
 # ---------------------------------------------------------------------------

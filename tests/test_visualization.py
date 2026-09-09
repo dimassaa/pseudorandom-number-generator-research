@@ -63,34 +63,41 @@ def hist_result(small_sample):
     return histogram_data(small_sample, num_bins=50, generator_name="MT19937")
 
 
-def test_plot_chi_square_comparison_creates_file(chi_result, tmp_path):
-    path = plot_chi_square_comparison({"MT19937": chi_result}, output_dir=str(tmp_path))
+# PNG magic bytes: \x89PNG\r\n\x1a\n.
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _assert_valid_png(path):
+    """Assert *path* is an existing, non-empty file whose first 8 bytes are the PNG magic."""
     assert os.path.isfile(path)
     assert os.path.getsize(path) > 0
+    with open(path, "rb") as fh:
+        assert fh.read(len(_PNG_MAGIC)) == _PNG_MAGIC
+
+
+def test_plot_chi_square_comparison_creates_file(chi_result, tmp_path):
+    path = plot_chi_square_comparison({"MT19937": chi_result}, output_dir=str(tmp_path))
+    _assert_valid_png(path)
 
 
 def test_plot_autocorrelation_creates_file(autocorr_result, tmp_path):
     path = plot_autocorrelation({"MT19937": autocorr_result}, output_dir=str(tmp_path))
-    assert os.path.isfile(path)
-    assert os.path.getsize(path) > 0
+    _assert_valid_png(path)
 
 
 def test_plot_spectral_creates_file(spectral_result, tmp_path):
     path = plot_spectral({"MT19937": spectral_result}, output_dir=str(tmp_path))
-    assert os.path.isfile(path)
-    assert os.path.getsize(path) > 0
+    _assert_valid_png(path)
 
 
 def test_plot_runs_creates_file(runs_result, tmp_path):
     path = plot_runs_z_scores({"MT19937": runs_result}, output_dir=str(tmp_path))
-    assert os.path.isfile(path)
-    assert os.path.getsize(path) > 0
+    _assert_valid_png(path)
 
 
 def test_plot_histograms_creates_file(hist_result, tmp_path):
     path = plot_histograms({"MT19937": hist_result}, output_dir=str(tmp_path))
-    assert os.path.isfile(path)
-    assert os.path.getsize(path) > 0
+    _assert_valid_png(path)
 
 
 def test_generate_all_plots_creates_multiple_files(tmp_path):
@@ -111,5 +118,4 @@ def test_generate_all_plots_creates_multiple_files(tmp_path):
     # 5 plot types × 1 PNG each = at least 5 PNG files.
     assert len(paths) >= 5
     for p in paths:
-        assert os.path.isfile(p)
-        assert os.path.getsize(p) > 0
+        _assert_valid_png(p)
