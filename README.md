@@ -4,6 +4,7 @@ Deterministic, reproducible analysis of ten pseudorandom number generators (PRNG
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-134%20passed-green)](tests/)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![JIT](https://img.shields.io/badge/numba-JIT%20accelerated-orange)](requirements.txt)
 [![SMT](https://img.shields.io/badge/z3-optional-blueviolet)](requirements.txt)
 
@@ -319,7 +320,7 @@ This is a self-contained research project, but contributions are welcome:
 
 ## License
 
-License not yet specified. If you intend to reuse or distribute this project, contact the author to select a license.
+Released under the [MIT License](LICENSE). Copyright (c) 2026 dimassaa.
 
 ## Acknowledgements
 
