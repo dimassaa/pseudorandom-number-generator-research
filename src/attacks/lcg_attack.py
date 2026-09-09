@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from functools import reduce
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -83,20 +82,6 @@ class LCGPredictor:
             self.state = (self.a * self.state + self.c) % self.m
             result.append(self.state)
         return result
-
-
-def _divisors(n: int) -> list[int]:
-    """Return all positive divisors of n in ascending order (n > 0)."""
-    if n <= 0:
-        return []
-    small: list[int] = []
-    large: list[int] = []
-    for i in range(1, int(math.isqrt(n)) + 1):
-        if n % i == 0:
-            small.append(i)
-            if i != n // i:
-                large.append(n // i)
-    return small + large[::-1]
 
 
 def _trial_divide(n: int) -> list[int]:
@@ -258,7 +243,12 @@ def attack_lcg(
     # Collect actual outputs the generator produces next
     actual = generator.generate(num_predictions)
 
-    match_count = sum(p == a for p, a in zip(predicted, actual))
+    # Count exact matches; use distinct names so the loop var doesn't shadow
+    # the recovered multiplier `a` from the parameter-recovery step above.
+    match_count = sum(
+        predicted_val == actual_val
+        for predicted_val, actual_val in zip(predicted, actual)
+    )
 
     return {
         "recovered_parameters": recovered,

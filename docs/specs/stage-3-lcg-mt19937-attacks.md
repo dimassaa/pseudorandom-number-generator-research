@@ -320,7 +320,7 @@ Tests to write:
 
 ## Exit Criteria
 
-- [ ] LCG known-modulus recovery works for all 4 LCG variants
+- [ ] LCG known-modulus recovery works for the full-state LCG variants (ANSI C, Numerical Recipes, BadLCG). GlibcLCG is intentionally unsupported by design — its `next_int()` returns the upper 15 bits of state, which is a many-to-one mapping (2^17 states per output), so exact (a, c) recovery from truncated observations is mathematically impossible; `attack_lcg` raises a documented `ValueError` instead.
 - [ ] LCG unknown-modulus recovery works for small and large moduli
 - [ ] LCG prediction accuracy is 100% (bit-identical) over 1000 outputs
 - [ ] MT19937 inverse tempering functions roundtrip correctly
