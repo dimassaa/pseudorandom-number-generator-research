@@ -9,6 +9,14 @@ from .statistical_tests import (
     histogram_data,
     run_all_tests,
 )
+from .visualization import (
+    plot_chi_square_comparison,
+    plot_autocorrelation,
+    plot_spectral,
+    plot_runs_z_scores,
+    plot_histograms,
+    generate_all_plots,
+)
 
 __all__ = [
     "TestResult",
@@ -18,4 +26,10 @@ __all__ = [
     "runs_test",
     "histogram_data",
     "run_all_tests",
+    "plot_chi_square_comparison",
+    "plot_autocorrelation",
+    "plot_spectral",
+    "plot_runs_z_scores",
+    "plot_histograms",
+    "generate_all_plots",
 ]
