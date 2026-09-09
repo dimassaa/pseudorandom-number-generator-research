@@ -15,6 +15,7 @@ from src.tests.statistical_tests import (
     spectral_test_2d,
     runs_test,
     histogram_data,
+    run_all_tests,
 )
 
 
@@ -110,3 +111,76 @@ def test_test_result_dataclass():
     assert isinstance(result.passed, bool)
     assert isinstance(result.details, dict)
     assert isinstance(result.comment, str)
+
+
+# --- Regression tests for degenerate paths (Issue 8) ---
+
+
+def test_chi_square_too_few_values_raises():
+    """Chi-square on 1 value raises ValueError; on 10 values (1 bin) too."""
+    import pytest
+
+    with pytest.raises(ValueError, match="at least 2 values"):
+        chi_square_test([42], generator_name="Test")
+
+    with pytest.raises(ValueError, match="insufficient samples"):
+        chi_square_test([1] * 10, num_bins=1000, generator_name="Test")
+
+
+def test_autocorrelation_constant_input_no_nan():
+    """Constant list -> passed=False, no exceptions, no RuntimeWarning."""
+    values = [7] * 1000
+    result = autocorrelation_test(values, generator_name="Test")
+    assert result.passed is False
+    assert np.isnan(result.p_value)
+    assert np.isinf(result.statistic)
+
+
+def test_autocorrelation_lag_too_large_raises():
+    """Lag >= n raises ValueError."""
+    import pytest
+
+    with pytest.raises(ValueError, match="lag.*>= number of samples"):
+        autocorrelation_test([1, 2, 3], lags=[3], generator_name="Test")
+
+
+def test_modulus_explicit_badlcg():
+    """BadLCG(42).generate(1000) with modulus=101 — proves modulus fix.
+
+    Without explicit modulus, bit-length inference gives modulus=128 →
+    quantization error → p=0.0. With modulus=101, p > 0.0 (values truly
+    uniform over their 101-domain). We use few bins so the expected count
+    per bin isn't pathologically small.
+    """
+    from src.generators import BadLCG
+
+    gen = BadLCG()
+    gen.seed(42)
+    values = gen.generate(1000)
+    result = chi_square_test(values, modulus=101, num_bins=10, generator_name="BadLCG")
+    # The key assertion: modulus fix prevents the false p=0.0 from
+    # bit-length misinference (128 instead of 101).
+    assert result.p_value > 0.0, (
+        f"modulus=101 should yield p>0.0, got p={result.p_value}"
+    )
+
+
+def test_run_all_tests_integration():
+    """run_all_tests returns correct structure and chi_square passes."""
+    from src.generators import PCG32
+
+    gen = PCG32()
+    results = run_all_tests(gen, n=200_000, n_spectral=10_000, seed=0)
+
+    assert set(results.keys()) == {
+        "chi_square", "autocorrelation", "spectral", "runs", "histogram"
+    }
+    for name, result in results.items():
+        assert isinstance(result, TestResult)
+        assert result.test_name == name or (
+            name == "spectral" and result.test_name == "spectral"
+        )
+        assert result.generator_name == "PCG32"
+        assert isinstance(result.passed, bool)
+
+    assert results["chi_square"].passed

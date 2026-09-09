@@ -7,6 +7,7 @@ type(s) the spec calls for.
 """
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 import numpy as np
 from scipy import stats
@@ -34,17 +35,22 @@ class TestResult:
     __test__ = False
 
 
-def _normalize(values: list) -> np.ndarray:
+def _normalize(values: list, modulus: Optional[int] = None) -> np.ndarray:
     """Normalize values to floats in [0, 1).
 
     Accepts either integers or already-normalized floats. For integer input,
-    generators differ in bit-width (32-bit standard, 64-bit V8), so the modulus
-    is inferred from the largest output's bit length rather than plumbed through
-    the spec-fixed signatures. Float input (from generate_floats) is already in
-    [0, 1) and used as-is.
+    when ``modulus`` is provided, divides by it directly (correct for any
+    domain including non-power-of-2). When ``modulus`` is None, infers from
+    the largest output's bit length — a heuristic that works for full-width
+    outputs from power-of-2 generators but can misjudge non-power-of-2 or
+    defective top-bit domains.
+
+    Float input (from generate_floats) is already in [0, 1) and used as-is.
     """
     if isinstance(values[0], float):
         return np.asarray(values, dtype=np.float64)
+    if modulus is not None:
+        return np.asarray(values, dtype=np.float64) / modulus
     modulus = 1 << max(v.bit_length() for v in values)
     return np.asarray(values, dtype=np.float64) / modulus
 
@@ -53,27 +59,37 @@ def chi_square_test(
     values: list[int],
     num_bins: int = 1000,
     generator_name: str = "unknown",
+    modulus: Optional[int] = None,
 ) -> TestResult:
     """Chi-square goodness-of-fit test for uniformity.
 
     Divides the normalized [0, 1) range into ``num_bins`` equal bins, counts
     observed frequencies, and compares them to the uniform expectation.
 
-    Edge case: with fewer values than bins the test is meaningless (many empty
-    bins inflate chi-square), so bin count is reduced to ``len(values) // 10``
-    and the reduction is noted in the comment.
+    When ``modulus`` is provided, normalizes by it directly (correct for
+    non-power-of-2 domains like BadLCG m=101). When None, uses bit-length
+    heuristic — adequate for full-width power-of-2 outputs but can misjudge
+    non-power-of-2 or defective top-bit domains.
+
+    Raises ValueError if fewer than 2 values or insufficient samples for bins.
     """
     n = len(values)
+    if n < 2:
+        raise ValueError("chi_square_test requires at least 2 values")
     comment = ""
 
     if n < num_bins:
-        num_bins = max(n // 10, 1)
+        num_bins = n // 10
+        if num_bins < 2:
+            raise ValueError(
+                f"insufficient samples for chi-square: {n} values yield < 2 bins"
+            )
         comment = (
             f"input too small ({n} values for {num_bins} bins); "
             f"reduced num_bins to {num_bins}"
         )
 
-    normalized = _normalize(values)
+    normalized = _normalize(values, modulus)
     counts, _ = np.histogram(normalized, bins=num_bins, range=(0.0, 1.0))
     expected = n / num_bins
 
@@ -106,7 +122,7 @@ def chi_square_test(
 
 def autocorrelation_test(
     values: list[int],
-    lags: list[int] = [1, 2, 5, 10],
+    lags: Optional[list[int]] = None,
     generator_name: str = "unknown",
 ) -> TestResult:
     """Pearson autocorrelation at the given lags.
@@ -114,9 +130,33 @@ def autocorrelation_test(
     For an ideal PRNG, successive values are uncorrelated, so Pearson r at any
     lag should be near 0. Works on the raw ints directly — the correlation is
     scale-invariant, so normalization is unnecessary.
+
+    Guards degenerate inputs: constant sequences (zero variance) produce
+    passed=False with NaN p-value instead of RuntimeWarning. Lag >= n raises
+    ValueError.
     """
+    if lags is None:
+        lags = [1, 2, 5, 10]
     a = np.asarray(values, dtype=np.float64)
     n = len(a)
+
+    for t in lags:
+        if t >= n:
+            raise ValueError(
+                f"lag {t} >= number of samples ({n})"
+            )
+
+    # Guard constant input: if std is zero, correlation is undefined.
+    if np.std(a) == 0.0:
+        return TestResult(
+            test_name="autocorrelation",
+            generator_name=generator_name,
+            statistic=float("inf"),
+            p_value=float("nan"),
+            passed=False,
+            details={"correlations": {}, "n": n},
+            comment="constant input — all values identical, no variance",
+        )
 
     correlations: dict[int, float] = {}
     for t in lags:
@@ -127,24 +167,26 @@ def autocorrelation_test(
         r = float(np.corrcoef(x, y)[0, 1])
         correlations[t] = r
 
-    # 95% confidence band is roughly 2/sqrt(N); require every lag to fall
+    # 95% confidence band is 2/sqrt(n-t) per lag; require every lag to fall
     # inside it. statistic is the worst (largest magnitude) correlation.
-    threshold = 2.0 / np.sqrt(n)
+    thresholds = {t: 2.0 / np.sqrt(n - t) for t in lags}
     statistic = max(abs(r) for r in correlations.values())
-    passed = all(abs(r) < threshold for r in correlations.values())
+    passed = all(
+        abs(r) < thresholds[t] for t, r in correlations.items()
+    )
 
     return TestResult(
         test_name="autocorrelation",
         generator_name=generator_name,
         statistic=statistic,
-        p_value=float("nan"),  # not a hypothesis test; per-lag band is reported
+        p_value=float("nan"),
         passed=passed,
         details={
             "correlations": correlations,
-            "threshold": float(threshold),
+            "thresholds": {t: float(th) for t, th in thresholds.items()},
             "n": n,
         },
-        comment="expected |r| < 2/sqrt(N) for all lags",
+        comment="expected |r| < 2/sqrt(n - lag) for all lags",
     )
 
 
@@ -152,12 +194,16 @@ def spectral_test_2d(
     values: list[int],
     sample_size: int = 100_000,
     generator_name: str = "unknown",
+    modulus: Optional[int] = None,
 ) -> TestResult:
     """Extract normalized 2D pairs (X_n, X_{n+1}) for lattice inspection.
 
     Reveals structure: a bad LCG shows parallel lines, good generators fill
     the space. This is a visual test only — pass is always True and the caller
     judges layout from the returned pairs.
+
+    When ``modulus`` is provided, normalizes both axes by it (consistent
+    lattice). When None, uses bit-length heuristic from the joined max.
     """
     # Need sample_size+1 values to form sample_size consecutive pairs.
     sample = values[: sample_size + 1]
@@ -165,9 +211,10 @@ def spectral_test_2d(
     x = sample[:-1]
     y = sample[1:]
 
-    # Normalize both axes with the bit-length modulus inferred from the whole
-    # sample; see _normalize for the bit-width rationale.
-    modulus = 1 << max(max(v.bit_length() for v in x), max(v.bit_length() for v in y))
+    # Compute a single modulus for both axes to avoid distorted lattice.
+    if modulus is None:
+        modulus = 1 << max(max(v.bit_length() for v in x), max(v.bit_length() for v in y))
+
     pairs_x = [float(v) / modulus for v in x]
     pairs_y = [float(v) / modulus for v in y]
 
@@ -228,13 +275,13 @@ def runs_test(
     return TestResult(
         test_name="runs",
         generator_name=generator_name,
-        statistic=float(observed_runs),
-        p_value=float("nan"),  # Z-based decision; report Z in details
+        statistic=float(abs(z)),
+        p_value=float(2 * stats.norm.sf(abs(z))),
         passed=passed,
         details={
             "z": float(z),
             "observed_runs": observed_runs,
-            "expected_runs": float(expectation),
+                "expected_runs": float(expectation),
             "variance": float(variance),
             "n0": n0,
             "n1": n1,
@@ -248,14 +295,18 @@ def histogram_data(
     values: list[int],
     num_bins: int = 200,
     generator_name: str = "unknown",
+    modulus: Optional[int] = None,
 ) -> TestResult:
     """Compute histogram bin counts for the value distribution.
 
     Returns bin edges and counts in details for plotting. ``statistic`` is a
     rough spread metric: max count minus the uniform expectation (positive when
     values cluster, near zero for uniform).
+
+    When ``modulus`` is provided, normalizes by it directly. When None, uses
+    bit-length heuristic — see ``_normalize`` for caveats.
     """
-    normalized = _normalize(values)
+    normalized = _normalize(values, modulus)
     counts, bin_edges = np.histogram(normalized, bins=num_bins, range=(0.0, 1.0))
 
     expected = len(values) / num_bins
@@ -286,21 +337,29 @@ def run_all_tests(
 ) -> dict[str, TestResult]:
     """Run all statistical tests on a generator and collect the results.
 
-    Seeds the generator, draws ``n`` values once, and runs every test over that
-    sample so the tests share a single deterministic stream. Spectral uses
-    ``n_spectral`` pairs from the head of the sample.
+    Seeds the generator once, then draws ``n`` integer values and ``n`` floats
+    from consecutive output of the same seeded stream (contiguous, not
+    identical — the float draw follows the int draw). Spectral uses
+    ``n_spectral`` pairs from the head of the integer sample.
+
+    Passes the correct modulus per generator: 2**64 for V8Random (the only
+    64-bit generator, documented as Stage-4 intentional deviation), 2**32 for
+    all others.
     """
+    from src.generators import V8Random  # Avoid circular import at module level.
+
     generator.seed(seed)
     values = generator.generate(n)
     floats = generator.generate_floats(n)
     generator_name = type(generator).__name__
 
-    # The histogram characterizes the float distribution; floats are already
-    # in [0, 1) so pass them straight through the normalization.
+    # 32/64-bit split mirrors the documented output widths of the generators.
+    modulus = 2**64 if isinstance(generator, V8Random) else 2**32
+
     return {
-        "chi_square": chi_square_test(values, num_bins=num_bins, generator_name=generator_name),
+        "chi_square": chi_square_test(values, num_bins=num_bins, generator_name=generator_name, modulus=modulus),
         "autocorrelation": autocorrelation_test(values, generator_name=generator_name),
-        "spectral": spectral_test_2d(values, sample_size=n_spectral, generator_name=generator_name),
+        "spectral": spectral_test_2d(values, sample_size=n_spectral, generator_name=generator_name, modulus=modulus),
         "runs": runs_test(values, generator_name=generator_name),
-        "histogram": histogram_data(floats, generator_name=generator_name),
+        "histogram": histogram_data(floats, generator_name=generator_name, modulus=modulus),
     }
