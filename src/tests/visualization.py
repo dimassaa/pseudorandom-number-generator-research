@@ -11,7 +11,6 @@ name for cross-plot consistency.
 
 import math
 import os
-from typing import Optional
 
 import matplotlib
 
@@ -38,14 +37,15 @@ BASE = [
 ]
 
 
-def _sort_key(name: str) -> tuple[int, str]:
+def _sort_key(name: str) -> tuple[int, int, str]:
     """Rank *name* by spec ordering, then alphabetically as a tiebreak.
 
-    Unknown names get a group index larger than every known family so they
-    sort last but are still included.
+    Known names sort by their BASE ordinal; unknown names get a group index
+    larger than every known family so they sort last but are still included.
     """
     ordinal = BASE.index(name) if name in BASE else len(BASE) + 1
-    return (0 if ordinal <= len(BASE) else 1, name)
+    group = 0 if ordinal <= len(BASE) else 1
+    return (group, ordinal, name)
 
 
 def _ordered_names(results: dict[str, TestResult]) -> list[str]:
