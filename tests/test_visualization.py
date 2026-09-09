@@ -8,7 +8,6 @@ checked — only that the file is created and has positive size.
 
 import os
 
-import numpy as np
 import pytest
 
 from src.generators import MT19937

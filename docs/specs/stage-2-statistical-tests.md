@@ -93,8 +93,8 @@ def autocorrelation_test(
 2. For each lag `t` in `lags`:
    - Compute Pearson r between `values[:-t]` and `values[t:]`
    - Using `numpy.corrcoef` or manual formula
-3. Test criterion: `|r| < 2 / sqrt(N)` for all lags (95% confidence)
-4. Return all lag correlations in `details["correlations"]`.
+3. Test criterion: `|r| < 2 / sqrt(N - t)` for all lags (95% confidence). Deviation: the spec prose says `2/sqrt(N)`, but the implementation uses the per-lag sample size `N - t`, which is statistically correct — a lag-`t` Pearson correlation has effective sample `N - t`, so the confidence band shrinks slightly with larger lags. The per-lag band is the binding criterion.
+4. Return all lag correlations in `details["correlations"]`. `p_value` is `NaN` (Pearson r has no clean closed-form p-value here; the ±band is the acceptance test). `statistic` = max |r| across lags; `passed` = True iff all lags pass.
 
 **Note:** Use `numpy` for speed. The correlation formula:
 ```
@@ -285,7 +285,7 @@ def generate_all_plots(
 - Axis labels with units where applicable.
 
 **Spectral test subplot layout:**
-- 2x3 grid (6 generators + variants).
+- Computed grid: up to 3 columns, rows = ceil(n_generators/3). With the 10 generator classes this renders a 4x3 grid — the spec's original "2x3" prose assumed 6 generators; the code grows the grid instead of hiding generators. Deviation documented here; the grid is never truncated.
 - Each subplot: scatter plot of pairs, equal aspect ratio, axis labels "X_n" and "X_{n+1}".
 - LCG subplot title includes "Structured" marker; others "Random" marker.
 
