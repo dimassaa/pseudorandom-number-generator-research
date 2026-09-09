@@ -15,4 +15,6 @@ from .xorshift_attack import (
     brute_force_xorshift32,
     recover_xorshift64_state,
     attack_xorshift64,
+    attack_v8_xorshift128,
+    analyze_xorshift_family,
 )

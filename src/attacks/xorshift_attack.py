@@ -1,19 +1,31 @@
-"""Xorshift32 brute-force and xorshift64 GF(2) linear-algebra state recovery.
+"""Xorshift-family state-recovery attacks: xorshift32 brute-force, xorshift64
+GF(2) linear algebra, V8 xorshift128+ z3 SMT solving, and family analysis.
 
-xorshift32 uses numba-accelerated brute force over all 2^32 states; xorshift64
-is linear over GF(2), so its full 64-bit state can be recovered from just the
-lower-32-bit outputs via Gaussian elimination — no search required.
+Part A — xorshift32 brute-force: numba-accelerated exhaustive sweep over all
+2^32 states.  Full 2^32 worst-case sweep completes in ~5.5s on modern CPU.
 
-The transition matrix T for xorshift64 is built once and reused across all
-recovery attempts.  Row-vector convention: state is a 1×64 row vector s, and
-the next state is s·T (matrix multiplication over GF(2)).  Each row T[i]
-encodes f(e_i) — the image of the i-th basis vector under the xorshift64 map.
+Part B — xorshift64 GF(2) recovery: the update is linear over GF(2), so its
+64-bit state is recovered from lower-32-bit outputs via Gaussian elimination.
+Transition matrix T is built once and reused.  Row-vector convention: state s
+is a 1×64 row vector; next state is s·T where T[i] = f(e_i).
 
-Measured brute-force wall-time: a worst-case full 2^32 sweep (state at
-0xFFFFFFFE, forcing the loop to scan the entire state space) completes in
-~5.5s on a modern CPU with numba's JIT — well under the spec's 40-80s
-estimate.  Practical tests use small seeds so the sweep exits almost
-immediately while still running the same numba kernel.
+Part C — V8 xorshift128+ z3 attack: the non-linear xorshift128+ update is
+encoded as z3 BitVec constraints and solved via SMT.  Requires raw 64-bit
+outputs (from V8Random.next_int()); float outputs lose the low 11 bits
+making recovery ambiguous (documented in attack_v8_xorshift128 docstring).
+Gracefully degrades when z3 is not installed.
+
+Part D — analyze_xorshift_family(): orchestrates all xorshift-family attacks
+and returns a predictability summary dict suitable for the Stage 6 report.
+
+Return-schema note: the recoverable attacks (brute_force_xorshift32,
+attack_xorshift64, and the Stage 3 LCG/MT19937 attacks) all return the
+5-key dict {state/recovered_parameters/state_recovered, actual_next,
+predicted_next, match_count, accuracy}.  attack_v8_xorshift128
+deliberately returns the spec-mandated {success, recovered_state,
+predicted_next, note} dict instead, since V8 recovery can legitimately
+fail (z3 absent, unsat).  analyze_xorshift_family and the Stage 6 report
+consumer must handle both shapes; unifying them is a Stage 6 task.
 """
 
 from __future__ import annotations
@@ -457,3 +469,208 @@ def attack_xorshift64(
         "match_count": match_count,
         "accuracy": match_count / num_predictions if num_predictions else 0.0,
     }
+
+
+# ---------------------------------------------------------------------------
+# Part C: V8 xorshift128+ z3 SMT attack
+# ---------------------------------------------------------------------------
+
+
+def attack_v8_xorshift128(
+    observations: list[int],
+    num_predictions: int = 10,
+) -> dict:
+    """Attempt xorshift128+ state recovery via z3 SMT solver.
+
+    Encodes the V8 xorshift128+ update as z3 BitVec constraints — one
+    constraint per observation — and solves for the initial (s0, s1) state.
+    Requires raw 64-bit outputs (from V8Random.next_int()).  Float outputs
+    only carry 53 bits of information (the low 11 bits are truncated by the
+    (raw >> 11) / 2^53 conversion), making the system ambiguous and recovery
+    unreliable.  This attack is designed for the "attacker can observe raw
+    64-bit sums" threat model, which is a valid demonstration of
+    xorshift128+'s non-cryptographic weakness.
+
+    The z3 encoding uses 64-bit BitVec variables so shifts and XOR wrap at
+    2^64 naturally — no explicit mask is needed on symbolic expressions.
+    Right shifts use z3.LShR (logical) because xorshift requires logical
+    shifts; z3's ``>>`` is arithmetic (sign-extending), which would corrupt
+    the state when the top bit is set.  A solver timeout of 30s prevents
+    hangs on pathological inputs.
+
+    Args:
+        observations: At least 2 consecutive raw 64-bit xorshift128+
+            outputs (from V8Random.next_int()).  More observations
+            tighten the constraints; typically 4 is sufficient for a
+            fast unique solve.
+        num_predictions: How many future outputs to predict.
+
+    Returns:
+        Dict with keys:
+            success (bool): whether state recovery succeeded.
+            recovered_state ((int, int) | None): recovered (s0, s1).
+            predicted_next (list[int] | None): next num_predictions values.
+            note (str): human-readable outcome.
+
+    Raises:
+        ValueError: If fewer than 2 observations are provided.
+    """
+    try:
+        import z3
+    except ImportError:
+        return {
+            "success": False,
+            "recovered_state": None,
+            "predicted_next": None,
+            "note": "z3 not installed",
+        }
+
+    if len(observations) < 2:
+        raise ValueError("at least 2 observations required")
+
+    # Use up to 8 observations for constraints — enough for a unique solve
+    # while keeping z3's internal work manageable.
+    num_to_use = min(len(observations), 8)
+
+    solver = z3.Solver()
+    solver.set("timeout", 30000)  # 30s timeout to avoid hangs
+
+    # s0_sym, s1_sym represent the state BEFORE the first observation.
+    # For each observation, apply the xorshift128+ update symbolically and
+    # assert the resulting 64-bit output equals the observed value.  The >> is
+    # a logical shift (z3.LShR); z3's native >> is arithmetic and would
+    # sign-extend, corrupting the XOR state.
+    s0_sym = z3.BitVec("s0", 64)
+    s1_sym = z3.BitVec("s1", 64)
+    sym_s0, sym_s1 = s0_sym, s1_sym
+
+    for i in range(num_to_use):
+        x = sym_s0
+        y = sym_s1
+        sym_s0_next = y
+        x = x ^ (x << 23)
+        sym_s1_next = x ^ y ^ z3.LShR(x, 17) ^ z3.LShR(y, 26)
+        output = sym_s1_next + y
+        solver.add(output == observations[i])
+        sym_s0 = sym_s0_next
+        sym_s1 = sym_s1_next
+
+    if solver.check() == z3.sat:
+        model = solver.model()
+        s0_val = model[s0_sym].as_long()
+        s1_val = model[s1_sym].as_long()
+        recovered = (s0_val, s1_val)
+    else:
+        return {
+            "success": False,
+            "recovered_state": None,
+            "predicted_next": None,
+            "note": "unSAT: observations inconsistent with xorshift128+ state",
+        }
+
+    # Fail-fast: recovered state must reproduce obs[0].
+    from src.generators.v8_random import V8Random
+
+    gen_check = V8Random(*recovered)
+    if gen_check.next_int() != observations[0]:
+        raise RuntimeError(
+            f"recovered state {recovered} does not reproduce obs[0]={observations[0]}"
+        )
+
+    # Predict: advance past the observed outputs, collect num_predictions.
+    gen_pred = V8Random(*recovered)
+    gen_pred.generate(len(observations))
+    predicted = [gen_pred.next_int() for _ in range(num_predictions)]
+
+    # Predicted outputs come from the recovered state itself, so they match
+    # any generator at the same position by construction.  The independent
+    # guarantee is the obs[0] reproduction (RuntimeError above) plus
+    # over-determination: the num_to_use observations give num_to_use*64 bits
+    # of constraints on a 128-bit state, so any sat model IS the true
+    # pre-observation state.
+    return {
+        "success": True,
+        "recovered_state": recovered,
+        "predicted_next": predicted,
+        "note": "state recovered via z3",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part D: xorshift family predictability analysis
+# ---------------------------------------------------------------------------
+
+
+def analyze_xorshift_family() -> dict:
+    """Run all xorshift-family attacks and report predictability.
+
+    Orchestrates xorshift32 brute-force, xorshift64 GF(2) recovery, and
+    V8 xorshift128+ z3 solving.  Each sub-attack uses a small known seed
+    and minimal observations so the analysis completes in seconds.
+
+    The result dict feeds directly into the Stage 6 predictability report.
+    When z3 is not installed, the V8 sub-result records recoverable=False
+    with an explanatory note; the function never raises under any
+    circumstance.
+
+    Returns:
+        Dict with keys for each generator family and an "all_recoverable"
+        bool summary.  Each sub-dict carries at minimum a "recoverable"
+        key and accuracy/coverage info where applicable.
+    """
+    results: dict = {}
+
+    # xorshift32: brute-force with a small seed (fast sweep).
+    try:
+        from src.generators.xorshift import XorShift32
+
+        gen32 = XorShift32(123)
+        obs32 = gen32.generate(3)
+        r32 = brute_force_xorshift32(obs32, num_predictions=20)
+        results["xorshift32"] = {
+            "recoverable": True,
+            "accuracy": r32["accuracy"],
+            "match_count": r32["match_count"],
+        }
+    except Exception as exc:
+        results["xorshift32"] = {"recoverable": False, "error": str(exc)}
+
+    # xorshift64: GF(2) recovery with a small seed.
+    try:
+        from src.generators.xorshift import XorShift64
+
+        gen64 = XorShift64(100)
+        obs64 = gen64.generate(6)
+        r64 = attack_xorshift64(obs64, num_predictions=20)
+        results["xorshift64"] = {
+            "recoverable": True,
+            "accuracy": r64["accuracy"],
+            "match_count": r64["match_count"],
+        }
+    except Exception as exc:
+        results["xorshift64"] = {"recoverable": False, "error": str(exc)}
+
+    # V8 xorshift128+: z3 solving with raw 64-bit observations.
+    try:
+        from src.generators.v8_random import V8Random
+
+        v8 = V8Random()
+        v8.seed(42)
+        obs_v8 = [v8.next_int() for _ in range(4)]
+        r_v8 = attack_v8_xorshift128(obs_v8, num_predictions=20)
+        results["v8_xorshift128plus"] = {
+            "recoverable": r_v8["success"],
+            "note": r_v8["note"],
+        }
+    except Exception as exc:
+        results["v8_xorshift128plus"] = {
+            "recoverable": False,
+            "error": str(exc),
+        }
+
+    results["all_recoverable"] = all(
+        sub.get("recoverable", False) for sub in results.values()
+        if isinstance(sub, dict) and "recoverable" in sub
+    )
+
+    return results

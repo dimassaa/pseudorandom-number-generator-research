@@ -216,3 +216,127 @@ def test_xorshift64_matrix_nonsingular():
     # Verify all values are 64-bit.
     for row in T:
         assert 0 <= row < (1 << 64)
+
+
+# ── V8 xorshift128+ z3 attack ─────────────────────────────────────────────
+
+
+def test_attack_v8_without_z3(monkeypatch):
+    """When z3 is missing, attack returns success=False with the expected note.
+
+    Simulates a missing z3 by injecting None into sys.modules so the
+    function-local ``import z3`` raises ImportError and takes the
+    graceful-degradation path.
+    """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "z3", None)
+
+    from src.attacks.xorshift_attack import attack_v8_xorshift128
+
+    result = attack_v8_xorshift128([100, 200, 300])
+
+    assert result["success"] is False
+    assert result["recovered_state"] is None
+    assert result["predicted_next"] is None
+    assert "z3 not installed" in result["note"]
+
+
+def test_attack_v8_with_z3():
+    """With z3 present, recover state from raw V8Random.next_int() outputs.
+
+    Uses V8Random with a known seed so the initial state is deterministic.
+    Collects 4 raw 64-bit observations, runs the z3 attack, and verifies:
+    1) recovered state reproduces obs[0] (the fail-fast RuntimeError check),
+    2) predicted_next matches a fresh generator advanced from the same state.
+    """
+    pytest.importorskip("z3")
+
+    from src.generators.v8_random import V8Random
+    from src.attacks.xorshift_attack import attack_v8_xorshift128
+
+    seed_s0 = 0x012de6b2
+    seed_s1 = 0x09501088
+    gen = V8Random(seed_s0, seed_s1)
+    obs = [gen.next_int() for _ in range(4)]
+
+    result = attack_v8_xorshift128(obs, num_predictions=100)
+
+    assert result["success"] is True
+    recovered_s0, recovered_s1 = result["recovered_state"]
+    assert isinstance(recovered_s0, int)
+    assert isinstance(recovered_s1, int)
+
+    # Recovered state reproduces obs[0].
+    gen_check = V8Random(recovered_s0, recovered_s1)
+    assert gen_check.next_int() == obs[0]
+
+    # Predicted continuation matches a fresh generator (by construction).
+    gen_pred = V8Random(recovered_s0, recovered_s1)
+    for _ in range(len(obs)):
+        gen_pred.next_int()
+    expected_predictions = [gen_pred.next_int() for _ in range(100)]
+    assert result["predicted_next"] == expected_predictions
+    assert result["note"] == "state recovered via z3"
+
+
+def test_attack_v8_float_ambiguity_documented():
+    """The function docstring must document the low-11-bits float ambiguity.
+
+    This is a contract test: the spec requires callers to understand that
+    float outputs (V8Random.next_float) only carry 53 bits and the attack
+    needs raw 64-bit next_int() outputs.  A missing docstring note would
+    leave callers unaware of the float-output limitation.
+    """
+    from src.attacks.xorshift_attack import attack_v8_xorshift128
+
+    docstring = attack_v8_xorshift128.__doc__ or ""
+    assert "11" in docstring, (
+        "Docstring must mention the low-11-bits float ambiguity"
+    )
+
+
+def test_analyze_xorshift_family_summary():
+    """analyze_xorshift_family returns a dict covering all three families.
+
+    With z3 present the v8 sub-result must be recoverable=True and the
+    overall dict must have all three family keys plus "all_recoverable".
+    The function must never raise — even if z3 were absent the v8 sub-result
+    would record recoverable=False.
+    """
+    from src.attacks.xorshift_attack import analyze_xorshift_family
+
+    result = analyze_xorshift_family()
+
+    assert "xorshift32" in result
+    assert "xorshift64" in result
+    assert "v8_xorshift128plus" in result
+    assert "all_recoverable" in result
+
+    assert result["xorshift32"]["recoverable"] is True
+    assert result["xorshift32"]["accuracy"] == 1.0
+
+    assert result["xorshift64"]["recoverable"] is True
+    assert result["xorshift64"]["accuracy"] == 1.0
+
+    # With z3 installed, V8 attack succeeds.
+    try:
+        pytest.importorskip("z3")
+        v8 = result["v8_xorshift128plus"]
+        assert v8["recoverable"] is True
+        assert v8["note"] == "state recovered via z3"
+    except pytest.skip.Exception:
+        # z3 not installed — verify graceful fallback.
+        assert result["v8_xorshift128plus"]["recoverable"] is False
+
+    assert isinstance(result["all_recoverable"], bool)
+
+
+def test_attack_v8_too_few_observations():
+    """Fewer than 2 observations raises ValueError with a greppable message."""
+    pytest.importorskip("z3")
+
+    from src.attacks.xorshift_attack import attack_v8_xorshift128
+
+    with pytest.raises(ValueError, match="at least 2 observations"):
+        attack_v8_xorshift128([100])
